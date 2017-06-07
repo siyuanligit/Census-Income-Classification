@@ -1,0 +1,799 @@
+---
+title: "STAT418 Homework 4"
+author: "Siyuan Li, 904884144"
+date: "6/7/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(warn = -1)
+
+suppressMessages(library(readr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(h2o))
+```
+
+### Introduction
+
+```{r, include=FALSE}
+### read in data
+suppressMessages(data1 <- read_csv("adult.csv", col_names = FALSE))
+suppressMessages(data2 <- read_csv("adult.test.csv", col_names = FALSE, na = "?"))
+adult <- rbind(data1, data2); rm(data1, data2) # bind data and remove redundent data from memory
+adult$X3 <- NULL; adult$X5 <- NULL # remove redundant column
+names(adult) <- c("age", "workclass", "education", "marital", "occupation", "relationship", "race", "sex", "capgain", "caploss", "hpw", "ethnicity", "income")
+
+### check and clean for missing values
+sapply(adult, function(x) sum(is.na(x)))
+adult <- adult[complete.cases(adult),]
+sapply(adult, function(x) sum(is.na(x))) # check again
+
+### convert response variable from factor to binary
+adult$income[which(adult$income == ">50K")] = 1 
+adult$income[which(adult$income == "<=50K")] = 0
+adult$income[which(adult$income == ">50K.")] = 1 
+adult$income[which(adult$income == "<=50K.")] = 0 
+adult$income <- as.numeric(adult$income)
+
+### convert categorical variable to factors
+adult[,c(2:8,12)] <- lapply(adult[,c(2:8,12)], factor)
+adult$education <- factor(adult$education, levels = c("Preschool", "1st-4th", "5th-6th", "7th-8th", "9th", "10th", "11th", "12th", "HS-grad", "Some-college", "Assoc-voc", "Assoc-acdm", "Bachelors", "Masters", "Prof-school", "Doctorate"))
+adult$marital <- factor(adult$marital, levels = c("Never-married", "Married-civ-spouse", "Married-spouse-absent", "Married-AF-spouse", "Separated", "Divorced", "Widowed"))
+```
+
+The dataset is "[Adult](https://archive.ics.uci.edu/ml/datasets/adult)" dataset from UCI Machine Learning Repository. This dataset contains features that are associated with predicting whether annual income will exceed 50k US Dollars.
+
+After data loading, cleaning missing rows, converting the response variable, the data contains 45222 obervations, 13 variables, with 34014 negative cases, and 11208 positive cases.
+
+### Exploratory Analysis
+
+##### Summary Statistics
+
+The variables that are taken into account are: Age, Work Class, Education Level, Marital Status, Occupation, Relationship in Marital Status, Race, Sex, Capital Gain(through investment), Capital Loss, Hours per Week, Ethnicity, and Income.
+ 
+The response variable in the data is "income" (being kept as in numeric for the moment).
+
+```{r, echo = FALSE}
+summary(adult)
+```
+
+##### Age
+
+Dot plot shows that there are more samples in the sub 50k income range, and while lower age group present more diverse income difference, higher age group does not show significant diversity. This is most likely the result of sample selection.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = as.data.frame(table(adult$age, adult$income)), aes(x = as.numeric(Var1), y = Freq))) + 
+  geom_point(data = as.data.frame(table(adult$age, adult$income)), aes(color = as.factor(Var2))) +
+  xlab("Age") +
+  ylab("Count") +
+  scale_color_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+##### Work Class
+
+Bar plot of Work Class shows that our sample mostly work in private sector. It also shows that while majority of the sample from private sector earns less than 50K annually, there must be other more significant factors that affects salary, since there is no cutoff anywhere in the bar plot where a specific work class dictates the income.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = adult, aes(x = workclass)) + 
+  geom_bar(stat="count", aes(fill = as.factor(income))) +
+  xlab("Work Class") + 
+  ylab("Count")) +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  scale_fill_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+##### Education
+
+Bar plot of education shows that most of our sample's level of education is between high school and bachelors degree. We can also see from those who graduates from professional schools or has a doctorate degree that samples from these groups tend to have higher level of income. Speculate that the higher the education level, the higher chance of getting a higher level pay.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = adult, aes(x = education)) + 
+  geom_bar(stat="count", aes(fill = as.factor(income))) + 
+  xlab("Education") + 
+  ylab("Count")) +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  scale_fill_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+Calculating the percentage of sample that has higher income level based on education, confirms our assumption.
+
+```{r, echo = FALSE}
+eduvinc <- as.data.frame(table(adult$education, adult$income))
+cbind(table(adult$education, adult$income), 
+  round(eduvinc$Freq[which(eduvinc$Var2 == 1)]/(eduvinc$Freq[which(eduvinc$Var2 == 0)]+eduvinc$Freq[which(eduvinc$Var2 == 1)]), digits = 4))
+```
+
+##### Marital Status
+
+Bar plot of Marital Status shows that samples that are single has a higher tendency to have lower level of income, while married samples tend to have a balanced spread.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = adult, aes(x = marital)) + 
+  geom_bar(stat="count", aes(fill = as.factor(income))) + 
+  xlab("Marital Status") + 
+  ylab("Count")) +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  scale_fill_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+##### Occupation
+
+Bar plot of occupation reveals that titles like executives, managerial, or specialist positions tend to have higer level of income comparing to others. This is quite obvious when comparing crafting and repairing titles with executives and managerial titles. While they have similar sample count, executives and managerial positions has significantly higher percentage of higher level of pay.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = adult, aes(x = occupation)) + 
+  geom_bar(stat="count", aes(fill = as.factor(income))) + 
+  xlab("Occupation") + 
+  ylab("Count")) +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  scale_fill_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+##### Race
+
+Bar plot of race shows that majority of our sample are white.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = adult, aes(x = race)) + 
+  geom_bar(stat="count", aes(fill = as.factor(income))) + 
+  xlab("Race") + 
+  ylab("Count")) +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  scale_fill_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+##### Sex
+
+Bar plot of Sex shows, while the amount of male samples in the data is twice of female, it is still significant that male samples tend to have higher level of income.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = adult, aes(x = sex)) + 
+  geom_bar(stat="count", aes(fill = as.factor(income))) + 
+  xlab("Sex") + 
+  ylab("Count")) +
+  scale_fill_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+##### Hours per Week
+
+Boxplot of Hours per Week show that hours per week is not a significant predictor with association to level of income.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = as.data.frame(table(adult$hpw, adult$income)), aes(x = as.factor(Var2), y = as.numeric(Var1)))) + 
+  geom_boxplot(aes(fill = as.factor(Var2))) +
+  xlab("Income Level") +
+  ylab("Hours Per Week") +
+  scale_fill_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+##### Capital Gain
+
+Dot plot of capital gain through investment shows that sample with lower level of income tend to have low capital gain, while sample with higher level of income tend to have more investment returns.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+suppressWarnings(ggplot(data = adult, aes(x = as.factor(income), y = capgain))) + 
+  geom_count(aes(color = as.factor(income))) +
+  xlab("Income Level") +
+  ylab("Capital Gain") +
+  scale_color_discrete(name="Income Level", breaks=c("0", "1"), labels=c("< 50K", ">= 50K"))
+```
+
+### Statistical Analysis
+
+```{r, include=FALSE}
+##### h2o initialization#####
+h2o.init(nthreads = 4, max_mem_size = "16G")
+h2o.no_progress()
+
+dt <- as.h2o(adult)
+dt[,13] <- as.factor(dt[,13])
+dt_split <- h2o.splitFrame(dt, ratios = c(0.6, 0.2), seed = 1)
+dt_train <- dt_split[[1]]
+dt_valid <- dt_split[[2]]
+dt_test <- dt_split[[3]]
+
+predictors <- names(dt_train)[which(names(dt_train) != "income")]
+```
+
+H2O is an awesome framework to base the analysis on, because it fully utilizes the computing power of my machines and provide various options for validation, tuning and optimization.
+
+##### Logistic Regression
+
+The first algorithm is logistic regression. The initial run uses lambda equals 0.
+
+Total run time:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+### logistic regression
+system.time({
+  logit2o <- h2o.glm(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    family = "binomial", 
+    lambda = 0)
+})
+time_logit = 1.35
+```
+
+The ROC curve shows that the logistic model is a really good fit for starters. Model Selection based on ROC curve is used to determine the trade-off between the sensitivity (True Positive) of the model versus the specificity (False Positive Rate), through which aims to reduce the false positive rate while imrpoving upon true positive rate, increasing the area under the curve (AUC). Which in other words, the higher the AUC, the better the model fits.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(logit2o, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_logit <- as.numeric(h2o.auc(h2o.performance(logit2o, dt_test)))
+auc_logit
+```
+
+Bootstrap lambda and validate if lambda = 0 is indeed the best. Let the training algorithm run through 51 lambdas from 0 to 0.5 and return a list of all the AUC with corresponding lambda.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+lam <- seq(0,0.5,0.01)
+metric <- list()
+for(i in 1:51){
+  logit2o <- h2o.glm(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    family = "binomial", 
+    lambda = lam[i])
+  metric[i] <- h2o.auc(h2o.performance(logit2o, dt_test))
+}
+ggplot(data = as.data.frame(cbind(lam, metric = as.numeric(metric))), aes(x = lam, y = metric)) + 
+    geom_line() + 
+    xlab("Lambda") + 
+    ylab("AUC")
+```
+
+Bootstrapping confirms that the best lambda is 0, or at least very close to 0.
+
+##### Random Forest
+
+The second algorithm is random forest. Initial model defaults to 100 trees. 
+
+Total run time:
+
+```{r, echo = FALSE}
+### random forest
+system.time({
+  rf2o <- h2o.randomForest(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    ntrees = 100, 
+    seed = 1)
+})
+time_rf = 9.268
+```
+
+The ROC curve:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(rf2o, dt_test), type = "roc")
+```
+
+The initial test set AUC is:
+
+```{r, echo = FALSE}
+auc_rf <- as.numeric(h2o.auc(h2o.performance(rf2o, dt_test)))
+auc_rf
+```
+
+Next, do hyperparamter tuning for random forest model. The mothod employed is random grid search since it is efficient in determinig a somewhat close estimate to the best model without running through all the possible parameters.
+
+Hyperparameters are set as:
+
+* trees: 100, 200, 300, 400, 500;
+* maximum tree depth: 10, 20, 30;
+* maximum number of variables considered for tree split: 2, 3, 4.
+
+Limit the maximum training run time to 5 minutes and maximum number of trained models to 20. Include early stopping mechanism with AUC as stopping metric and tolerance of 0.
+
+Total run time:
+
+```{r, echo = FALSE}
+rfhp <- list(ntrees = c(100, 200, 300, 400, 500), 
+  max_depth = c(10, 20, 30),
+  mtries = c(2, 3, 4))
+
+rfsc <- list(strategy = "RandomDiscrete",
+  max_runtime_secs = 5*60,
+  max_models = 20)
+
+system.time({
+  rf2ogrid <- h2o.grid(algorithm = "randomForest", grid_id = "rf",
+    x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid,
+    hyper_params = rfhp,
+    search_criteria = rfsc,
+    stopping_metric = "AUC", stopping_tolerance = 0, stopping_rounds = 2,
+    seed = 1)
+})
+
+rf_sort <- h2o.getGrid(grid_id = "rf", sort_by = "auc", decreasing = TRUE)
+rf_best <- h2o.getModel(rf_sort@model_ids[[1]])
+```
+
+The model with the most AUC has 400 trees, maximum tree depth of 20 and maximum number of variables considered for tree split of 2.
+
+The ROC curve of the best model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(rf_best, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_rfgrid <- as.numeric(h2o.auc(h2o.performance(rf_best, dt_test)))
+auc_rfgrid
+```
+
+##### Gradient Boosting Machine
+
+The third algorithm is gradient boosting machine. Initial model defaults to 100 tress, and maximum tree depth of 10.
+
+Total run time:
+
+```{r, echo = FALSE}
+system.time({
+  gbm2o <- h2o.gbm(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    distribution = "bernoulli", 
+    ntrees = 100, 
+    max_depth = 10, 
+    seed = 1)
+})
+time_gbm = 7.255
+```
+
+The ROC curve:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(gbm2o, dt_test), type = "roc")
+```
+
+The initial test set AUC is:
+
+```{r, echo = FALSE}
+auc_gbm <- as.numeric(h2o.auc(h2o.performance(gbm2o, dt_test)))
+auc_gbm
+```
+
+Also do a hyperparameter tuning for gradient boosting machine model. 
+
+Hyperparameters are set as:
+
+* number of trees: 300, 400, 500;
+* maximum tree depth: 10, 20, 30;
+* minimum observations per leaf: 1, 5, 10, 20, 50;
+* learning rate: 0.01, 0.03, 0.05, 0.07, 0.1;
+* learning rate scaler: 0.99, 0.995, 1.
+
+Limit the maximum training run time to 10 minutes and maximum number of trained models to 50. Considering the amount of calculation involved in gradient boosting machine, guessing we will reach the maximum run time before train through 50 models. Include early stopping mechanism with AUC as stopping metric and tolerance of 0.
+
+Total run time:
+
+```{r, echo = FALSE}
+gbmhp <- list(ntrees = c(300, 400, 500),
+  max_depth = c(10, 20, 30), 
+  min_rows = c(1, 5, 10, 20, 50),
+  learn_rate = c(0.01, 0.03, 0.05, 0.07, 0.1),  
+  learn_rate_annealing = c(0.99, 0.995, 1))
+
+gbmsc <- list(strategy = "RandomDiscrete",
+  max_runtime_secs = 10*60,
+  max_models = 50)
+
+system.time({
+  gbm2ogrid <- h2o.grid(algorithm = "gbm", grid_id = "gbm",
+    x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid,
+    hyper_params = gbmhp,
+    search_criteria = gbmsc,
+    stopping_metric = "AUC", stopping_tolerance = 0, stopping_rounds = 2,
+    seed = 1)
+})
+
+gbm_sort <- h2o.getGrid(grid_id = "gbm", sort_by = "auc", decreasing = TRUE)
+gbm_best <- h2o.getModel(gbm_sort@model_ids[[1]])
+
+```
+
+The model with the most AUC has 300 trees, maximum tree depth of 10, minimum observations per leaf of 50, learning rate of 0.05 and learning rate scaler of 1.0.
+
+The ROC curve of the best model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(gbm_best, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_gbmgrid <- as.numeric(h2o.auc(h2o.performance(gbm_best, dt_test)))
+auc_gbmgrid
+```
+
+##### Neural Network
+
+The fourth algorithm is neural networks. *Initial* model defaults to 100 data run-throughs, early stopping metric using AUC and tolerance of 0.
+
+```{r, echo = FALSE}
+system.time({
+  nn2o1 <- h2o.deeplearning(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    epochs = 100, 
+    stopping_rounds = 2, 
+    stopping_metric = "AUC", 
+    stopping_tolerance = 0,
+    seed = 1,
+    reproducible = TRUE)
+})
+time_nn1 = 48.743
+```
+
+The ROC curve of the model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(nn2o1, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_nn1 <- as.numeric(h2o.auc(h2o.performance(nn2o1, dt_test)))
+auc_nn1
+```
+
+*2nd* run uses rectifier activation function and four hidden layer each with 50 neurons, with all other parameter kept at default.
+
+```{r, echo = FALSE}
+system.time({
+  nn2o2 <- h2o.deeplearning(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    epochs = 100, 
+    activation = "Rectifier", 
+    hidden = c(50,50,50,50),
+    stopping_rounds = 2, 
+    stopping_metric = "AUC", 
+    stopping_tolerance = 0,
+    seed = 1,
+    reproducible = TRUE)
+})
+time_nn2 = 21.56
+```
+
+The ROC curve of the model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(nn2o2, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_nn2 <- as.numeric(h2o.auc(h2o.performance(nn2o2, dt_test)))
+auc_nn2
+```
+
+*3rd* run uses rectifier activation function, four hidden layer each with 50 neurons, include an input drop out ratio of 20%, with all other parameter kept at default.
+
+```{r, echo = FALSE}
+system.time({
+  nn2o3 <- h2o.deeplearning(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    epochs = 100, 
+    activation = "Rectifier", 
+    hidden = c(50,50,50,50),
+    input_dropout_ratio = 0.2,
+    stopping_rounds = 2, 
+    stopping_metric = "AUC", 
+    stopping_tolerance = 0,
+    seed = 1,
+    reproducible = TRUE)
+})
+time_nn3 = 22.429
+```
+
+The ROC curve of the model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(nn2o3, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_nn3 <- as.numeric(h2o.auc(h2o.performance(nn2o3, dt_test)))
+auc_nn3
+```
+
+*4th* run uses rectifier activation function, two hidden layer with 50 neurons each, with all other parameter kept at default.
+
+```{r, echo = FALSE}
+system.time({
+  nn2o4 <- h2o.deeplearning(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    epochs = 100, 
+    activation = "Rectifier", 
+    hidden = c(50,50),
+    stopping_rounds = 2, 
+    stopping_metric = "AUC", 
+    stopping_tolerance = 0,
+    seed = 1,
+    reproducible = TRUE)
+})
+time_nn4 = 10.299
+```
+
+The ROC curve of the model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(nn2o4, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_nn4 <- as.numeric(h2o.auc(h2o.performance(nn2o4, dt_test)))
+auc_nn4
+```
+
+*5th* run uses rectifier activation function, one hidden layer with 50 neurons, with all other parameter kept at default.
+
+```{r, echo = FALSE}
+system.time({
+  nn2o5 <- h2o.deeplearning(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    epochs = 100, 
+    activation = "Rectifier", 
+    hidden = c(50),
+    stopping_rounds = 2, 
+    stopping_metric = "AUC", 
+    stopping_tolerance = 0,
+    seed = 1,
+    reproducible = TRUE)
+})
+time_nn5 = 6.285
+```
+
+The ROC curve of the model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(nn2o5, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_nn5 <- as.numeric(h2o.auc(h2o.performance(nn2o5, dt_test)))
+auc_nn5
+```
+
+*6th* run uses rectifier activation function, four hidden layer with 100 neurons, with all other parameter kept at default.
+
+```{r, echo = FALSE}
+system.time({
+  nn2o6 <- h2o.deeplearning(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    epochs = 100, 
+    activation = "Rectifier", 
+    hidden = c(100,100,100,100),
+    stopping_rounds = 2, 
+    stopping_metric = "AUC", 
+    stopping_tolerance = 0,
+    seed = 1,
+    reproducible = TRUE)
+})
+time_nn6 = 56.82
+```
+
+The ROC curve of the model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(nn2o6, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_nn6 <- as.numeric(h2o.auc(h2o.performance(nn2o6, dt_test)))
+auc_nn6
+```
+
+*7th* run uses rectifier activation function, four hidden layer with 100 neurons, include hidden layer drop out ratios of 20%, 10%, 10% and 0%, with all other parameter kept at default.
+
+```{r, echo = FALSE}
+system.time({
+  nn2o7 <- h2o.deeplearning(x = predictors, y = "income", 
+    training_frame = dt_train, validation_frame = dt_valid, 
+    epochs = 100, 
+    activation = "RectifierWithDropout", 
+    hidden = c(100,100,100,100),
+    hidden_dropout_ratios=c(0.2,0.1,0.1,0),
+    stopping_rounds = 2, 
+    stopping_metric = "AUC", 
+    stopping_tolerance = 0,
+    seed = 1,
+    reproducible = TRUE)
+})
+time_nn7 = 37.589
+```
+
+The ROC curve of the model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(nn2o7, dt_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+auc_nn7 <- as.numeric(h2o.auc(h2o.performance(nn2o7, dt_test)))
+auc_nn7
+```
+
+Now compare all the manually tuned neural network models. They all produced similar AUC around 0.906 to 0.910. However, looking at the time it takes to achieve high level of AUC (cost effectiveness) is an important metric here in determining the best model. Plotting the time each model took to form and their relative AUC indicate that, similar to how we evaluate a good ROC curve, the model that sits the most top left is the best, since it uses the least time to achieve a relatively high AUC. In this case, model number 5, which uses one hidden layer of 50 neurons is the best here.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+nn_compare <- as.data.frame(cbind(
+  rbind(time_nn1, time_nn2, time_nn3, time_nn4, time_nn5, time_nn6, time_nn7),
+  rbind(auc_nn1, auc_nn2, auc_nn3, auc_nn4, auc_nn5, auc_nn6, auc_nn7)
+  ))
+
+ggplot(data = nn_compare, aes(x = V1, y = V2, color = row.names(nn_compare))) +
+  geom_point(aes(size = V2), alpha = 0.8) +
+  scale_size(guide = 'none') +
+  xlab("Time Used") + 
+  ylab("AUC") +
+  scale_color_discrete(
+    name="Neural Network Models:", 
+    breaks=c("time_nn1", "time_nn2", "time_nn3", "time_nn4", "time_nn5", "time_nn6", "time_nn7"), 
+    labels=c("NN1", "NN2", "NN3", "NN4", "NN5", "NN6", "NN7"))
+```
+
+##### Ensemble
+
+Finally, try ensemble all the best model found from above section. Ensembling requires n-fold cross validation done to the models, which we did use but used validation frame do in the above sections. This cross validation process also do not require validation frame specified. So resample the data with 70% as training and 30% as testing, and re-do the best models with 5 fold cross validation and early stopping using AUC and tolerance 0.
+
+```{r, include = FALSE}
+df <- as.h2o(adult)
+df[,13] <- as.factor(df[,13])
+df_split <- h2o.splitFrame(df, ratios = 0.7, seed = 1)
+df_train <- df_split[[1]]
+df_test <- df_split[[2]]
+
+predictordf <- names(df_train)[which(names(df_train) != "income")]
+
+system.time({
+  logit2ocv <- h2o.glm(x = predictordf, y = "income", 
+    training_frame = df_train, 
+    family = "binomial", 
+    lambda = 0,
+    seed = 1,
+    nfolds = 5, 
+    fold_assignment = "Modulo", 
+    keep_cross_validation_predictions = TRUE)
+})
+time_logitcv = 1.205
+
+system.time({
+  rf2ocv <- h2o.randomForest(x = predictordf, y = "income", 
+    training_frame = df_train, 
+    ntrees = 400,
+    max_depth = 20,
+    mtries = 2,
+    stopping_metric = "AUC", stopping_tolerance = 0, stopping_rounds = 2,
+    seed = 1,
+    nfolds = 5, 
+    fold_assignment = "Modulo", 
+    keep_cross_validation_predictions = TRUE)
+})
+time_rfcv = 127.52
+
+system.time({
+  gbm2ocv <- h2o.gbm(x = predictordf, y = "income", 
+    training_frame = df_train, 
+    distribution = "bernoulli", 
+    ntrees = 300, 
+    max_depth = 10, 
+    min_rows = 50,
+    learn_rate = 0.05, 
+    learn_rate_annealing = 1.0,
+    stopping_metric = "AUC", stopping_tolerance = 0, stopping_rounds = 2,
+    seed = 1,
+    nfolds = 5, 
+    fold_assignment = "Modulo", 
+    keep_cross_validation_predictions = TRUE)
+})
+time_gbmcv = 54.769
+
+system.time({
+  nn2ocv <- h2o.deeplearning(x = predictordf, y = "income", 
+    training_frame = df_train, 
+    epochs = 100, 
+    activation = "Rectifier", 
+    hidden = c(50),
+    stopping_metric = "AUC", stopping_tolerance = 0, stopping_rounds = 2,
+    seed = 1,
+    nfolds = 5, 
+    fold_assignment = "Modulo", 
+    keep_cross_validation_predictions = TRUE) 
+})
+time_nncv = 62.886
+
+system.time({
+  ens2o <- h2o.stackedEnsemble(x = predictordf, y = "income", 
+    training_frame = df_train,
+    base_models = list(logit2ocv@model_id, 
+      rf2ocv@model_id, 
+      gbm2ocv@model_id,
+      nn2ocv@model_id))
+})
+time_ens = 10.211
+time_ens_total = time_ens + 
+  time_logitcv + 
+  time_rfcv + 
+  time_gbmcv + 
+  time_nncv
+
+logistic <- as.numeric(h2o.auc(h2o.performance(logit2ocv, df_test)))
+randomForest <- as.numeric(h2o.auc(h2o.performance(rf2ocv, df_test)))
+gradientBoostMachine <- as.numeric(h2o.auc(h2o.performance(gbm2ocv, df_test)))
+neuralNetwork <- as.numeric(h2o.auc(h2o.performance(nn2ocv, df_test)))
+ensemble <- as.numeric(h2o.auc(h2o.performance(ens2o, df_test)))
+```
+
+The ROC curve of the ensemble model:
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+plot(h2o.performance(ens2o, df_test), type = "roc")
+```
+
+The resulting test set AUC is:
+
+```{r, echo = FALSE}
+ensemble
+```
+
+Also take a look at how the ensemble model is made up of:
+
+```{r, echo = FALSE}
+h2o.getModel(ens2o@model$metalearner$name)@model$coefficients_table
+```
+
+Notice that the models that have lowest AUC, namely Logistic Regression and Neural Network, has the lowest coefficients in the ensemble model.
+
+##### Comparing All Models
+
+Perform a cost effectiveness analysis on all the models we produced thus far. When factoring in the total time it took for ensemble to generate a model, keep in mind that for ensemble to work, you need the other models first. Thus, the total time ensemble model need is all other best models combined, resulting in very high "cost." 
+
+Based on the graph, the most efficient model is Gradient Boosting Machine, with the highest AUC with relatively fast speed.
+
+Also notice on the graph, that our best Neural Network model did not work very well against cross validation, which means this neural network model has low generalization, which also means our manual tuning is not optimized at all. Consider H2O's deepwater for hyperparameter optimization in future updates.
+
+```{r, echo = FALSE, fig.width = 7, fig.height = 5}
+model_compare <- as.data.frame(cbind(
+  rbind(time_logitcv, time_rfcv, time_gbmcv, time_nn1, time_nn2, time_nn3, time_nn4, time_nncv, time_nn6, time_nn7, time_ens_total),
+  rbind(logistic, randomForest, gradientBoostMachine, auc_nn1, auc_nn2, auc_nn3, auc_nn4, neuralNetwork, auc_nn6, auc_nn7, ensemble)
+))
+
+ggplot(data = model_compare, aes(x = V1, y = V2, color = row.names(model_compare))) +
+  geom_point(aes(size = V2)) +
+  geom_text(aes(label = c("Best Logit", "Best RF", "Best GBM", "NN1", "NN2", "NN3", "NN4", "Best NN", "NN6", "NN7", "Ensemble")), check_overlap = TRUE, hjust = -0.3, vjust = -0.3) +
+  scale_size(guide = 'none') +
+  xlab("Time Used") + 
+  ylab("AUC") +
+  scale_color_discrete(
+    name="Models:", 
+    breaks=c("time_logitcv", "time_rfcv", "time_gbmcv", "time_nn1", "time_nn2", "time_nn3", "time_nn4", "time_nncv", "time_nn6", "time_nn7", "time_ens_total"), 
+    labels=c("Best Logit", "Best RF", "Best GBM", "NN1", "NN2", "NN3", "NN4", "Best NN", "NN6", "NN7", "Ensemble"))
+
+```
+
+#### Conclusion:
+
+All of the models present really high standard accuracy in predicting the test set data. Thus, there are not much to discuss about the ROC curve between models. However, cost effectiveness analysis is fruitful in indicating a most efficient model among all.
+
+Things to improve upon the project may include better hyperparameter optimization regarding neural network. Using tools such as Deepwater on H2O framework.
